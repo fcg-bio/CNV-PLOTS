@@ -9,11 +9,9 @@
     1) Barplot showing gain and loses, with bars representing the number of samples having a CNV change.
     2) Tile plot detailing the cnv changes by sample.
     3) Join plot (1+2) using the new multiplot function
-
   Usage: Rscript cnv-plot.R [options] <input file>
-
   Example : cnv-plot.R file.tsv
-	
+
   Input format: Tab separated file with the column names (the order is not important)
     1 Chromosome REQ
     2 Start REQ
@@ -27,7 +25,7 @@
     1 bin : Bin size for windows. Default = 1000000
     2 main : Main for plots. Default = Empty
     3 bsgenome : BSgenome library. Default = BSgenome.Hsapiens.UCSC.hg19
-    3 prefix : Prefix for output files. Default = cnv-plot
+    4 prefix : Prefix for output files. Default = cnv-plot
 	"
 }
 
@@ -36,14 +34,15 @@
 {
 # Reading arguments
 argsRaw<-commandArgs(trailingOnly = T)
-if (length(argsRaw) == 0)  stop("File not provided. Check Usage:", usage)
+if (length(argsRaw) == 0){ cat(usage,"\n"); stop("File not provided. Check Usage")}
 
 # Creating argument list
 arguments <- list (file=NULL, main="", bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC.hg19", prefix = "cnv-plot")
 
 # Get input file name
 arguments$file = argsRaw[length(argsRaw)]
-if(!file.exists(arguments$file)) stop("Input file doesn't exists",usage)
+
+if(!file.exists(arguments$file)) {at(usage,"\n");stop("Input file doesn't exists")}
 
 # Read the other arguments
 for(i in 1:(length(argsRaw)-1)){
@@ -55,19 +54,19 @@ for(i in 1:(length(argsRaw)-1)){
 # Reading and processing input files
 {
   dat <- read.delim(arguments$file, stringsAsFactors = F)
-  
+
   # Check Chromosome Column Format
   dat$Chromosome <- gsub("chr","",dat$Chromosome)
   
   # Check Type Column Format
   dat$Type <- tolower(dat$Type)
   errorFormat <- which(!dat$Type %in% c("gain","deletion","loss"))
-  if(length(errorFormat)>0) stop("Please provide a correct values for type column",usage)
+  if(length(errorFormat)>0) {cat(usage,"\n"); stop("Please provide a correct values for type column")}
   dat$Type[dat$Type == "loss"] <- "deletion"
   
   # Check Other Column Formats
-  if(!class(dat[,"Start"])=="integer") stop("Please provide a correct Start input format (integer)",usage)
-  if(!class(dat[,"End"])=="integer") stop("Please provide a correct End input format (integer)",usage)
+  if(!class(dat[,"Start"])=="integer") {cat(usage,"\n"); stop("Please provide a correct Start input format (integer)")}
+  if(!class(dat[,"End"])=="integer") {cat(usage,"\n"); stop("Please provide a correct End input format (integer)")}
   
   
 }
@@ -82,6 +81,11 @@ CNV.sample.count.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BS
   
   # Arguments
   # data Format: Required columns Chromosome, Start, End, Sample, Type
+
+  # Check default parameters
+  if(!exists("bin")) bin <- 1000000
+  if(!exists("BSgenome")) BSgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+  if(!exists("main")) main <- ""
   
   # Loading Libraries
   suppressPackageStartupMessages(library(GenomicRanges))
@@ -106,12 +110,16 @@ CNV.sample.count.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BS
 
   # Correction for missing Chromosome data 
   # fake entries that must be set to coverage = 0 in res data.frame
-  emptyChr <- chrLevels[!chrLevels %in% data$Chromosome]
-  for (eChr in emptyChr) {
-    eGain <- c(eChr,1,1,"gain")
-    data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- eGain
-    eDeletion <- c(eChr,1,1,"deletion")
-    data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- eDeletion
+  # All combinations Type - Chromosome
+  cnvDelete <- list(c(),c())
+  names(cnvDelete) <- levels(factor(data$Type))
+  for (typeCnv in levels(factor(data$Type)) ) {
+    sdata <- subset(data, Type==typeCnv)
+    emptyChr <- chrLevels[!chrLevels %in% sdata$Chromosome]
+    for (eChr in emptyChr) {
+      cnvDelete[[typeCnv]] <- c(cnvDelete[[typeCnv]],eChr)
+      data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- c(eChr,1,1,typeCnv)
+    }
   }
    
   # Convert coordinates by bin size
@@ -172,7 +180,8 @@ CNV.sample.count.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BS
   res$Position[res$Type=="gain"] <- 1:dim(res[res$Type=="gain",])[1]
   res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="gain",])[1]
   res$Chromosome <- factor(res$Chromosome, chrLevels)
-  res$coverage[res$Chromosome %in% emptyChr] <-0
+  res$coverage[res$Type=="gaib" & res$Chromosome %in% cnvDelete$gain] <-0
+  res$coverage[res$Type=="deletion" & res$Chromosome %in% cnvDelete$deletion] <-0
   res$coverage[res$Type=="deletion"] <- -res$coverage[res$Type=="deletion"]
   res$seq_type <-paste(res$Type, res$Chromosome, sep="_")
   res$seq_type <- factor(res$seq_type, levels=unique(res$seq_type))
@@ -213,6 +222,11 @@ CNV.sample.tile.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BSg
   # Arguments
   # data Format: Required columns Chromosome, Start, End, Sample, Type
 
+  # Check default parameters
+  if(!exists("bin")) bin <- 1000000
+  if(!exists("BSgenome")) BSgenome <- "BSgenome.Hsapiens.UCSC.hg19"
+  if(!exists("main")) main <- ""
+  
   # Loading Libraries
   suppressPackageStartupMessages(library(GenomicRanges))
   suppressPackageStartupMessages(library(BSgenome, character.only = T))
