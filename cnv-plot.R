@@ -72,266 +72,7 @@ for(i in 1:(length(argsRaw)-1)){
 }
 
 
-CNV.sample.count.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BSgenome, main="") {
-  # Description
-  # From a list of CNV in multiple samples it calculates the number of gains and deletions in each bin and plot the summary in Barplot
-  
-  # Usage
-  # CNV.sample.count.plot(data, bin, main="", BSgenome="BSgenome.Hsapiens.UCSC.hg19")
-  
-  # Arguments
-  # data Format: Required columns Chromosome, Start, End, Sample, Type
-
-  # Check default parameters
-  if(!exists("bin")) bin <- 1000000
-  if(!exists("BSgenome")) BSgenome <- "BSgenome.Hsapiens.UCSC.hg19"
-  if(!exists("main")) main <- ""
-  
-  # Loading Libraries
-  suppressPackageStartupMessages(library(GenomicRanges))
-  suppressPackageStartupMessages(library(BSgenome, character.only = T))
-  suppressPackageStartupMessages(library(ggplot2))
-  suppressPackageStartupMessages(library(ggbio))
-  suppressPackageStartupMessages(library(biovizBase))
-  suppressPackageStartupMessages(library(gridExtra))
-  
-  # Arguments format
-  bin <- as.numeric(bin)
-  
-  
-  # Get Chromosomes lengths
-  chrlengths <- seqlengths(get(BSgenome))
-  names(chrlengths) <- gsub("chr", "", names(chrlengths))
-  chrNumeric <- grep("^[0-9]+$", names(chrlengths), value = T) # Get only numeric chr
-  chrNonNumeric <- grep("^[0-9]+$", names(chrlengths), value = T, invert = T)
-  chrNonNumeric <- chrNonNumeric[chrNonNumeric %in%  data$Chromosome]
-  chrLevels <- c(chrNumeric, chrNonNumeric)
-  chrlengths <- chrlengths[chrLevels]
-
-  # Correction for missing Chromosome data 
-  # fake entries that must be set to coverage = 0 in res data.frame
-  # All combinations Type - Chromosome
-  cnvDelete <- list(c(),c())
-  names(cnvDelete) <- levels(factor(data$Type))
-  for (typeCnv in levels(factor(data$Type)) ) {
-    sdata <- subset(data, Type==typeCnv)
-    emptyChr <- chrLevels[!chrLevels %in% sdata$Chromosome]
-    for (eChr in emptyChr) {
-      cnvDelete[[typeCnv]] <- c(cnvDelete[[typeCnv]],eChr)
-      data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- c(eChr,1,1,typeCnv)
-    }
-  }
-   
-  # Convert coordinates by bin size
-  data$Start <- ceiling(as.integer(data$Start)/bin)
-  data$End <- ceiling(as.integer(data$End)/bin)
-  chrlengths <- ceiling(chrlengths/bin)
-  
-  # Conver to Factor
-  data$Chromosome <- factor(data$Chromosome, chrLevels)
-  data$Type <-  factor(data$Type, levels=c("gain","deletion"))
-  
-  # Create GenomicRanges Object
-  gr <- GRanges(seqnames = data$Chromosome, IRanges(start = data$Start, end = data$End), Type = data$Type)
-  seqlengths(gr) <- chrlengths
-  facets <- as.formula(Type~seqnames)
-  grl <- splitByFacets(gr, facets)
-  
-  # Sort grl by chromosome and type
-  z <- outer(levels(data$Type), levels(data$Chromosome), paste, sep=".")
-  z <- c(z[1,],z[2,])
-  z <- z[z %in% paste(data$Type, data$Chromosome, sep=".")]
-  grl <- grl[z]
-  
-  # Create Coverage Data Frame
-  xlim <- c(min(start(ranges(gr))),max(end(ranges(gr))))
-  lst <- lapply(grl, function(dt){
-    vals <- coverage(keepSeqlevels(dt, unique(as.character(seqnames(dt)))))
-    seqName <- as.character(seqnames(dt)@values)
-    if(any(is.na(seqlengths(dt)))){
-      seqs <- xlim[1]:max(end(dt))
-      vals <- vals[[1]][seqs]
-      vals <- as.numeric(vals)                           
-      vals <- c(vals, rep(0, xlim[2]-max(end(dt))))
-      seqs <- xlim[1]:xlim[2]
-    }else{
-      seqs <- 1:seqlengths(dt)[seqName]
-      vals <- vals[[1]][seqs]
-      vals <- as.numeric(vals)                           
-    }
-    if(length(unique(values(dt)$.id.name))){                
-      res <- data.frame(coverage = vals, seqs = seqs,
-                        seqnames =
-                          as.character(seqnames(dt))[1],
-                        .id.name = unique(values(dt)$.id.name))
-    }else{
-      res <- data.frame(coverage = vals, seqs = seqs,
-                        seqnames = as.character(seqnames(dt))[1])      
-    }
-    res
-  })
-  res <- do.call(rbind, lst)
-  lres <- lapply(row.names(res), function(x){unlist(strsplit(x, "\\."))[1:2]})
-  lrmat <- do.call(rbind, lres)
-  dimnames(lrmat) <- list(c(),c("Type","Chromosome"))
-  res <- cbind(res,lrmat)
-  res$Type <- relevel(res$Type, ref="gain")
-  res$Position <- NA
-  res$Position[res$Type=="gain"] <- 1:dim(res[res$Type=="gain",])[1]
-  res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="gain",])[1]
-  res$Chromosome <- factor(res$Chromosome, chrLevels)
-  res$coverage[res$Type=="gaib" & res$Chromosome %in% cnvDelete$gain] <-0
-  res$coverage[res$Type=="deletion" & res$Chromosome %in% cnvDelete$deletion] <-0
-  res$coverage[res$Type=="deletion"] <- -res$coverage[res$Type=="deletion"]
-  res$seq_type <-paste(res$Type, res$Chromosome, sep="_")
-  res$seq_type <- factor(res$seq_type, levels=unique(res$seq_type))
-  
-  # Plot
-  sl <- seqlengths(grl)
-  csl <- cumsum(seqlengths(grl))
-  breaks <- csl - (sl/2)
-  cols <- c(rep(c("#899DA4","#78B7C5"),nlevels(res$Chromosome)/2), rep(c("#C93312","#F21A00"),nlevels(res$Chromosome)/2))
-  names(cols) <- levels(res$seq_type)
-  
-  p <- ggplot(data = res, aes(x=Position, width=1)) + 
-    scale_x_continuous(name = "Chromosome", breaks = breaks, minor_breaks = csl[-length(csl)]+0.5,  expand=c(0,0)) +
-    geom_bar(data=subset(res, Type=="gain"), aes(y=coverage, fill=seq_type), stat = "identity", position = "identity") + 
-    geom_bar(data=subset(res, Type=="deletion"), aes(y=coverage, fill=seq_type), stat = "identity", position = "identity") + 
-    geom_hline(aes(yintercept=0), colour="#FFFFFF", size = 1) + 
-    theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank(), panel.grid.major.x=element_blank(), panel.grid.major.x=element_blank(), axis.ticks = element_blank()) +
-    theme(panel.grid.minor.x=element_line(colour='red',linetype='dashed'))+
-    theme(panel.background=element_blank()) +
-    theme(legend.position="none") + 
-    ylab(paste("Deletion","Gain", sep="      ")) +
-    scale_fill_manual(values = cols) + 
-    ggtitle(main)
-  # p + annotate("text", x = breaks, y = 0, label = names(breaks))
-  
-  p
-  
-}
-
-
-CNV.sample.count.table <- function(data, bin=arguments$bin, BSgenome=arguments$BSgenome, main="") {
-  # Description
-  # From a list of CNV in multiple samples it calculates the number of gains and deletions in each bin and create a data.frame with the info
-  
-  # Usage
-  # CNV.sample.count.table(data, bin, main="", BSgenome="BSgenome.Hsapiens.UCSC.hg19")
-  
-  # Arguments
-  # data Format: Required columns Chromosome, Start, End, Sample, Type
-  
-  # Check default parameters
-  if(!exists("bin")) bin <- 1000000
-  if(!exists("BSgenome")) BSgenome <- "BSgenome.Hsapiens.UCSC.hg19"
-  if(!exists("main")) main <- ""
-  
-  # Loading Libraries
-  suppressPackageStartupMessages(library(GenomicRanges))
-  suppressPackageStartupMessages(library(BSgenome, character.only = T))
-  suppressPackageStartupMessages(library(ggplot2))
-  suppressPackageStartupMessages(library(ggbio))
-  suppressPackageStartupMessages(library(biovizBase))
-  suppressPackageStartupMessages(library(gridExtra))
-  
-  # Arguments format
-  bin <- as.numeric(bin)
-  
-  
-  # Get Chromosomes lengths
-  chrlengths <- seqlengths(get(BSgenome))
-  names(chrlengths) <- gsub("chr", "", names(chrlengths))
-  chrNumeric <- grep("^[0-9]+$", names(chrlengths), value = T) # Get only numeric chr
-  chrNonNumeric <- grep("^[0-9]+$", names(chrlengths), value = T, invert = T)
-  chrNonNumeric <- chrNonNumeric[chrNonNumeric %in%  data$Chromosome]
-  chrLevels <- c(chrNumeric, chrNonNumeric)
-  chrlengths <- chrlengths[chrLevels]
-  
-  # Correction for missing Chromosome data 
-  # fake entries that must be set to coverage = 0 in res data.frame
-  # All combinations Type - Chromosome
-  cnvDelete <- list(c(),c())
-  names(cnvDelete) <- levels(factor(data$Type))
-  for (typeCnv in levels(factor(data$Type)) ) {
-    sdata <- subset(data, Type==typeCnv)
-    emptyChr <- chrLevels[!chrLevels %in% sdata$Chromosome]
-    for (eChr in emptyChr) {
-      cnvDelete[[typeCnv]] <- c(cnvDelete[[typeCnv]],eChr)
-      data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- c(eChr,1,1,typeCnv)
-    }
-  }
-  
-  # Convert coordinates by bin size
-  data$Start <- ceiling(as.integer(data$Start)/bin)
-  data$End <- ceiling(as.integer(data$End)/bin)
-  chrlengths <- ceiling(chrlengths/bin)
-  
-  # Conver to Factor
-  data$Chromosome <- factor(data$Chromosome, chrLevels)
-  data$Type <-  factor(data$Type, levels=c("gain","deletion"))
-  
-  # Create GenomicRanges Object
-  gr <- GRanges(seqnames = data$Chromosome, IRanges(start = data$Start, end = data$End), Type = data$Type)
-  seqlengths(gr) <- chrlengths
-  facets <- as.formula(Type~seqnames)
-  grl <- splitByFacets(gr, facets)
-  
-  # Sort grl by chromosome and type
-  z <- outer(levels(data$Type), levels(data$Chromosome), paste, sep=".")
-  z <- c(z[1,],z[2,])
-  z <- z[z %in% paste(data$Type, data$Chromosome, sep=".")]
-  grl <- grl[z]
-  
-  # Create Coverage Data Frame
-  xlim <- c(min(start(ranges(gr))),max(end(ranges(gr))))
-  lst <- lapply(grl, function(dt){
-    vals <- coverage(keepSeqlevels(dt, unique(as.character(seqnames(dt)))))
-    seqName <- as.character(seqnames(dt)@values)
-    if(any(is.na(seqlengths(dt)))){
-      seqs <- xlim[1]:max(end(dt))
-      vals <- vals[[1]][seqs]
-      vals <- as.numeric(vals)                           
-      vals <- c(vals, rep(0, xlim[2]-max(end(dt))))
-      seqs <- xlim[1]:xlim[2]
-    }else{
-      seqs <- 1:seqlengths(dt)[seqName]
-      vals <- vals[[1]][seqs]
-      vals <- as.numeric(vals)                           
-    }
-    if(length(unique(values(dt)$.id.name))){                
-      res <- data.frame(coverage = vals, seqs = seqs,
-                        seqnames =
-                          as.character(seqnames(dt))[1],
-                        .id.name = unique(values(dt)$.id.name))
-    }else{
-      res <- data.frame(coverage = vals, seqs = seqs,
-                        seqnames = as.character(seqnames(dt))[1])      
-    }
-    res
-  })
-  res <- do.call(rbind, lst)
-  lres <- lapply(row.names(res), function(x){unlist(strsplit(x, "\\."))[1:2]})
-  lrmat <- do.call(rbind, lres)
-  dimnames(lrmat) <- list(c(),c("Type","Chromosome"))
-  res <- cbind(res,lrmat)
-  res$Type <- relevel(res$Type, ref="gain")
-  res$Position <- NA
-  res$Position[res$Type=="gain"] <- 1:dim(res[res$Type=="gain",])[1]
-  res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="gain",])[1]
-  res$Chromosome <- factor(res$Chromosome, chrLevels)
-  res$coverage[res$Type=="gaib" & res$Chromosome %in% cnvDelete$gain] <-0
-  res$coverage[res$Type=="deletion" & res$Chromosome %in% cnvDelete$deletion] <-0
-  res$coverage[res$Type=="deletion"] <- -res$coverage[res$Type=="deletion"]
-  res$seq_type <-paste(res$Type, res$Chromosome, sep="_")
-  res$seq_type <- factor(res$seq_type, levels=unique(res$seq_type))
-  
-  return(res)
-
-  
-}
-
-CNV.sample.tile.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BSgenome, main="") {
+CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC.hg19", main="") {
   # Description
   # From a list of CNV in multiple samples it performs a tile plot with gains and loses
   
@@ -446,17 +187,159 @@ CNV.sample.tile.plot <- function(data, bin=arguments$bin, BSgenome=arguments$BSg
 }
 
 
-p1 <- CNV.sample.count.plot(dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
+CNV.sample.count <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC.hg19", main="") {
+  # Description
+  # From a list of CNV in multiple samples it calculates the number of gains and deletions in each bin and plot the summary in Barplot. If a sample has more than one CNV coordinate in the bin, it counts only once
+  
+  # Usage
+  # CNV.sample.count.plot(data, bin, main="", BSgenome="BSgenome.Hsapiens.UCSC.hg19")
+  
+  # Arguments
+  # data Format: Required columns Chromosome, Start, End, Sample, Type
+  
+  # Loading Libraries
+  suppressPackageStartupMessages(library(GenomicRanges))
+  suppressPackageStartupMessages(library(BSgenome, character.only = T))
+  suppressPackageStartupMessages(library(ggplot2))
+  suppressPackageStartupMessages(library(ggbio))
+  suppressPackageStartupMessages(library(biovizBase))
+  suppressPackageStartupMessages(library(gridExtra))
+  
+  # Arguments format
+  bin <- as.numeric(bin)
+  
+  # Get only necessary columns from the data
+  data <- data[,c("Chromosome","Start","End","Sample","Type")]
+  
+  # Get Chromosomes lengths
+  chrlengths <- seqlengths(get(BSgenome))
+  names(chrlengths) <- gsub("chr", "", names(chrlengths))
+  chrNumeric <- grep("^[0-9]+$", names(chrlengths), value = T) # Get only numeric chr
+  chrNonNumeric <- grep("^[0-9]+$", names(chrlengths), value = T, invert = T)
+  chrNonNumeric <- chrNonNumeric[chrNonNumeric %in%  data$Chromosome]
+  chrLevels <- c(chrNumeric, chrNonNumeric)
+  chrlengths <- chrlengths[chrLevels]
+  
+  # Correction for missing Chromosome data 
+  # fake entries that must be set to coverage = 0 in res data.frame
+  # All combinations Type - Chromosome
+  cnvDelete <- list(c(),c())
+  names(cnvDelete) <- levels(factor(data$Type))
+  for (typeCnv in levels(factor(data$Type)) ) {
+    sdata <- subset(data, Type==typeCnv)
+    emptyChr <- chrLevels[!chrLevels %in% sdata$Chromosome]
+    for (eChr in emptyChr) {
+      cnvDelete[[typeCnv]] <- c(cnvDelete[[typeCnv]],eChr)
+      data[dim(data)[1]+1,c("Chromosome","Start","End","Type")] <- c(eChr,1,1,typeCnv)
+    }
+  }
+  
+  # Convert coordinates by bin size
+  data$Start <- ceiling(as.integer(data$Start)/bin)
+  data$End <- ceiling(as.integer(data$End)/bin)
+  chrlengths <- ceiling(chrlengths/bin)
+  
+  # Get only unique values from data. If a sample has more than one CNV coordinate in the bin, it counts only once
+  data <- unique(data)
+  
+  # Conver to Factor
+  data$Chromosome <- factor(data$Chromosome, chrLevels)
+  data$Type <-  factor(data$Type, levels=c("gain","deletion"))
+  
+  # Create GenomicRanges Object
+  gr <- GRanges(seqnames = data$Chromosome, IRanges(start = data$Start, end = data$End), Type = data$Type)
+  seqlengths(gr) <- chrlengths
+  facets <- as.formula(Type~seqnames)
+  grl <- splitByFacets(gr, facets)
+  
+  # Sort grl by chromosome and type
+  z <- outer(levels(data$Type), levels(data$Chromosome), paste, sep=".")
+  z <- c(z[1,],z[2,])
+  z <- z[z %in% paste(data$Type, data$Chromosome, sep=".")]
+  grl <- grl[z]
+  
+  # Create Coverage Data Frame
+  xlim <- c(min(start(ranges(gr))),max(end(ranges(gr))))
+  lst <- lapply(grl, function(dt){
+    vals <- coverage(keepSeqlevels(dt, unique(as.character(seqnames(dt)))))
+    seqName <- as.character(seqnames(dt)@values)
+    if(any(is.na(seqlengths(dt)))){
+      seqs <- xlim[1]:max(end(dt))
+      vals <- vals[[1]][seqs]
+      vals <- as.numeric(vals)                           
+      vals <- c(vals, rep(0, xlim[2]-max(end(dt))))
+      seqs <- xlim[1]:xlim[2]
+    }else{
+      seqs <- 1:seqlengths(dt)[seqName]
+      vals <- vals[[1]][seqs]
+      vals <- as.numeric(vals)                           
+    }
+    if(length(unique(values(dt)$.id.name))){                
+      res <- data.frame(coverage = vals, seqs = seqs,
+                        seqnames =
+                          as.character(seqnames(dt))[1],
+                        .id.name = unique(values(dt)$.id.name))
+    }else{
+      res <- data.frame(coverage = vals, seqs = seqs,
+                        seqnames = as.character(seqnames(dt))[1])      
+    }
+    res
+  })
+  res <- do.call(rbind, lst)
+  lres <- lapply(row.names(res), function(x){unlist(strsplit(x, "\\."))[1:2]})
+  lrmat <- do.call(rbind, lres)
+  dimnames(lrmat) <- list(c(),c("Type","Chromosome"))
+  res <- cbind(res,lrmat)
+  res$Type <- relevel(res$Type, ref="gain")
+  res$Position <- NA
+  res$Position[res$Type=="gain"] <- 1:dim(res[res$Type=="gain",])[1]
+  res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="gain",])[1]
+  res$Chromosome <- factor(res$Chromosome, chrLevels)
+  res$coverage[res$Type=="gaib" & res$Chromosome %in% cnvDelete$gain] <-0
+  res$coverage[res$Type=="deletion" & res$Chromosome %in% cnvDelete$deletion] <-0
+  res$coverage[res$Type=="deletion"] <- -res$coverage[res$Type=="deletion"]
+  res$seq_type <-paste(res$Type, res$Chromosome, sep="_")
+  res$seq_type <- factor(res$seq_type, levels=unique(res$seq_type))
+  
+  # Plot
+  sl <- seqlengths(grl)
+  csl <- cumsum(seqlengths(grl))
+  breaks <- csl - (sl/2)
+  cols <- c(rep(c("#899DA4","#78B7C5"),nlevels(res$Chromosome)/2), rep(c("#C93312","#F21A00"),nlevels(res$Chromosome)/2))
+  names(cols) <- levels(res$seq_type)
+  ylimits <- c(-max(abs(res$coverage)), max(abs(res$coverage)))
+  
+  p <- ggplot(data = res, aes(x=Position, width=1)) + 
+    scale_x_continuous(name = "Chromosome", breaks = breaks, minor_breaks = csl[-length(csl)]+0.5,  expand=c(0,0)) + 
+    scale_y_continuous(limits=ylimits) +
+    geom_bar(data=subset(res, Type=="gain"), aes(y=coverage, fill=seq_type), stat = "identity", position = "identity") + 
+    geom_bar(data=subset(res, Type=="deletion"), aes(y=coverage, fill=seq_type), stat = "identity", position = "identity") + 
+    geom_hline(aes(yintercept=0), colour="#FFFFFF", size = 1) + 
+    theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank(), panel.grid.major.x=element_blank(), panel.grid.major.x=element_blank(), axis.ticks = element_blank()) +
+    theme(panel.grid.minor.x=element_line(colour='red',linetype='dashed'))+
+    theme(panel.background=element_blank()) +
+    theme(legend.position="none") + 
+    ylab(paste("Deletion","Gain", sep="      ")) +
+    scale_fill_manual(values = cols) + 
+    ggtitle(main)
+  # p + annotate("text", x = breaks, y = 0, label = names(breaks))  
+  
+  # Return plot and table
+  return(list("plot" = p, "table" = res))
+  
+}
 
-t1 <- CNV.sample.count.table(dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
+
+p1 <- CNV.sample.count(dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
+
 
 p2 <- CNV.sample.tile.plot(data=dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
 
-write.table(t1, file = paste(arguments$prefix,"sum.txt", sep="."), row.names=F, quote=F, sep="\t")
+write.table(p1$table, file = paste(arguments$prefix,"sum.txt", sep="."), row.names=F, quote=F, sep="\t")
 
 pdfName <- paste(arguments$prefix,"sum.pdf", sep=".")
 pdf(pdfName, width= 19, height= 8, title=arguments$main)
-print(p1)
+print(p1$plot)
 dev.off()
 
 pdfName <- paste(arguments$prefix,"bySample.pdf", sep=".")
@@ -466,5 +349,5 @@ dev.off()
 
 pdfName <- paste(arguments$prefix,"combined.pdf", sep=".")
 pdf(pdfName, width= 19, height= 16, title=arguments$main)
-grid.arrange(p1, p2, ncol=1, nrow=2, heights=c(1, 4))
+grid.arrange(p1$plot, p2, ncol=1, nrow=2, heights=c(1, 4))
 dev.off()
