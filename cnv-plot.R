@@ -10,7 +10,7 @@
     2) Tile plot detailing the cnv changes by sample.
     3) Join plot (1+2) using the new multiplot function
   Usage: Rscript cnv-plot.R [options] <input file>
-  Example : cnv-plot.R file.tsv
+  Example : cnv-plot.R prefix=cnv-plot file.tsv
 
   Input format: Tab separated file with the column names (the order is not important)
     1 Chromosome REQ
