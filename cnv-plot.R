@@ -49,6 +49,7 @@ for(i in 1:(length(argsRaw)-1)){
   argsRaw2<-unlist(strsplit(argsRaw[i],"="))
   arguments[argsRaw2[1]]<-argsRaw2[2]
 }
+
 }
 
 # Reading and processing input files
@@ -93,6 +94,7 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
   suppressPackageStartupMessages(library(ggplot2))
   suppressPackageStartupMessages(library(ggbio))
   suppressPackageStartupMessages(library(gridExtra))
+  suppressPackageStartupMessages(library(plyr))
   
   # Arguments format
   bin <- as.numeric(bin)
@@ -143,8 +145,8 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
   # Dealing with deletions spanning more than 1 bin
   y1 <- data[data$StartPos == data$EndPos,]
   y2 <- data[data$StartPos != data$EndPos,]
-  
-  ly <- apply(y2,1,function(yl){
+    # alply equal to apply but always returns a list
+  ly <- alply(y2,1,function(yl){
     npos <- as.numeric(yl["StartPos"]):as.numeric(yl["EndPos"])
     if(exists("res")) rm(res)
     for (i in npos){
@@ -156,6 +158,7 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
   })
   
   lymat <- do.call(rbind, ly)
+  lymat <- apply(lymat,2,unlist)
   dimnames(lymat)[[2]] <- names(y1)
   dimnames(lymat)[[1]] <- 1:dim(lymat)[1]
   lymat <- data.frame(lymat)
@@ -163,6 +166,9 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
   row.names(y1) <- NULL
   data <- rbind(y1,lymat)
   data$StartPos <- as.numeric(data$StartPos)
+  data$EndPos <- as.numeric(data$EndPos)
+  data$Start <- as.numeric(data$Start)
+  data$End <- as.numeric(data$End)
   
   # Plot
   sl <- chrlengths
@@ -174,7 +180,7 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
 
   p <- ggplot(data, aes(x=StartPos, y=Sample, fill=factor(Type)))+
     geom_tile()+
-    scale_x_continuous(name = "Chromosome", breaks=breaks, minor_breaks = csl[-length(csl)]+0.5, limits=xlim, expand=c(0,0))+
+    scale_x_continuous(name = "Chromosome", breaks=breaks, minor_breaks = csl[-length(csl)]+0.5, limits=xlim, expand=c(0,0)) +
     scale_fill_manual(values=c("#C93312","#899DA4"))+
     theme(panel.background=element_blank())+
     theme(legend.position="none") +
@@ -182,7 +188,7 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
     theme(panel.grid.minor.x=element_line(colour='red',linetype='dashed')) + 
     ggtitle(main)
   
-  p
+  p + geom_vline(1, colour="#BB0000", linetype="dashed")
 
 }
 
@@ -293,9 +299,9 @@ CNV.sample.count <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC
   res$Type <- relevel(res$Type, ref="gain")
   res$Position <- NA
   res$Position[res$Type=="gain"] <- 1:dim(res[res$Type=="gain",])[1]
-  res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="gain",])[1]
+  res$Position[res$Type=="deletion"] <- 1:dim(res[res$Type=="deletion",])[1]
   res$Chromosome <- factor(res$Chromosome, chrLevels)
-  res$coverage[res$Type=="gaib" & res$Chromosome %in% cnvDelete$gain] <-0
+  res$coverage[res$Type=="gain" & res$Chromosome %in% cnvDelete$gain] <-0
   res$coverage[res$Type=="deletion" & res$Chromosome %in% cnvDelete$deletion] <-0
   res$coverage[res$Type=="deletion"] <- -res$coverage[res$Type=="deletion"]
   res$seq_type <-paste(res$Type, res$Chromosome, sep="_")
@@ -332,15 +338,15 @@ CNV.sample.count <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC
 
 p1 <- CNV.sample.count(dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
 
-
-p2 <- CNV.sample.tile.plot(data=dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
-
 write.table(p1$table, file = paste(arguments$prefix,"sum.txt", sep="."), row.names=F, quote=F, sep="\t")
 
 pdfName <- paste(arguments$prefix,"sum.pdf", sep=".")
 pdf(pdfName, width= 19, height= 8, title=arguments$main)
 print(p1$plot)
 dev.off()
+
+
+p2 <- CNV.sample.tile.plot(data=dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
 
 pdfName <- paste(arguments$prefix,"bySample.pdf", sep=".")
 pdf(pdfName, width= 19, height= 8, title=arguments$main)

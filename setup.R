@@ -4,6 +4,7 @@
 cran.packages <- c(
 	"RColorBrewer"
 	,"ggplot2"
+  ,"plyr"
 	)
 biocLite.packages <- c("Biostrings", "BSgenome", "BSgenome.Hsapiens.UCSC.hg19", "GenomicRanges", "ggbio", "biovizBase", "gridExtra")
 
