@@ -42,7 +42,7 @@ arguments <- list (file=NULL, main="", bin=1000000, BSgenome="BSgenome.Hsapiens.
 # Get input file name
 arguments$file = argsRaw[length(argsRaw)]
 
-if(!file.exists(arguments$file)) {at(usage,"\n");stop("Input file doesn't exists")}
+if(!file.exists(arguments$file)) {cat(usage,"\n");stop("Input file doesn't exists")}
 
 # Read the other arguments
 for(i in 1:(length(argsRaw)-1)){
@@ -188,7 +188,7 @@ CNV.sample.tile.plot <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.
     theme(panel.grid.minor.x=element_line(colour='red',linetype='dashed')) + 
     ggtitle(main)
   
-  p + geom_vline(1, colour="#BB0000", linetype="dashed")
+  p + geom_vline(xintercept =1, colour="#BB0000", linetype="dashed")
 
 }
 
@@ -345,6 +345,11 @@ pdf(pdfName, width= 19, height= 8, title=arguments$main)
 print(p1$plot)
 dev.off()
 
+svgName <- paste(arguments$prefix,"sum.svg", sep=".")
+svg(svgName, width= 19, height= 8)
+print(p1$plot)
+dev.off()
+
 
 p2 <- CNV.sample.tile.plot(data=dat, bin=arguments$bin, main=arguments$main, BSgenome=arguments$BSgenome)
 
@@ -353,7 +358,19 @@ pdf(pdfName, width= 19, height= 8, title=arguments$main)
 print(p2)
 dev.off()
 
+svgName <- paste(arguments$prefix,"bySample.svg", sep=".")
+svg(svgName, width= 19, height= 8)
+print(p2)
+dev.off()
+
+
+
 pdfName <- paste(arguments$prefix,"combined.pdf", sep=".")
 pdf(pdfName, width= 19, height= 16, title=arguments$main)
+grid.arrange(p1$plot, p2, ncol=1, nrow=2, heights=c(1, 4))
+dev.off()
+
+svgName <- paste(arguments$prefix,"combined.svg", sep=".")
+svg(svgName, width= 19, height= 16)
 grid.arrange(p1$plot, p2, ncol=1, nrow=2, heights=c(1, 4))
 dev.off()
