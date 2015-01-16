@@ -311,7 +311,7 @@ CNV.sample.count <- function(data, bin=1000000, BSgenome="BSgenome.Hsapiens.UCSC
   sl <- seqlengths(grl)
   csl <- cumsum(seqlengths(grl))
   breaks <- csl - (sl/2)
-  cols <- c(rep(c("#899DA4","#78B7C5"),nlevels(res$Chromosome)/2), rep(c("#C93312","#F21A00"),nlevels(res$Chromosome)/2))
+  cols <- c(rep_len(c("#899DA4","#78B7C5"),nlevels(res$Chromosome)), rep_len(c("#C93312","#F21A00"),nlevels(res$Chromosome)))
   names(cols) <- levels(res$seq_type)
   ylimits <- c(-max(abs(res$coverage)), max(abs(res$coverage)))
   
